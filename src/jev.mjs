@@ -9,7 +9,7 @@ export const API_URL = process.env.JEV_API_URL || "https://api.typesafe.ai/v1/sy
 export const MODEL = process.env.JEV_MODEL || "jev-latest";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-const KEY_NAMES = ["JEV_API_KEY", "TYPESAFE_API_KEY", "API_KEY"];
+const KEY_NAMES = ["TYPESAFE_API_KEY"];
 let cachedKey;
 export function apiKey() {
   if (cachedKey) return cachedKey;
@@ -21,7 +21,7 @@ export function apiKey() {
       if (m && KEY_NAMES.includes(m[1])) return (cachedKey = m[2]);
     }
   }
-  throw new Error(`No Jev API key: set ${KEY_NAMES.join(" / ")} or put it in .env`);
+  throw new Error("No TypeSafe API key: set TYPESAFE_API_KEY in the environment or in .env");
 }
 
 // questions: { name: { type: "noul" | "choice" | "score", instructions, criteria? } }

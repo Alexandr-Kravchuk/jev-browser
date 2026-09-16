@@ -3,7 +3,7 @@
 //
 //   claude mcp add jev-browser -- node /path/to/jev-browser/bin/jev-browser-mcp.mjs
 //
-// Env: JEV_API_KEY (or TYPESAFE_API_KEY / API_KEY), JEV_BROWSER_HEADED=1,
+// Env: TYPESAFE_API_KEY, JEV_BROWSER_HEADED=1,
 //      JEV_BROWSER_PROFILE=/dir (persistent profile, keeps logins), JEV_BROWSER_LOG=1 (rounds to stderr)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
