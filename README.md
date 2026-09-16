@@ -171,6 +171,20 @@ test/                offline fixture tests, MCP end-to-end test
 NOTES.md             design notes: what works with Jev, what doesn't, and why
 ```
 
+## Releasing
+
+CI runs the offline tests on every push and pull request. To publish, bump the version and push
+the tag; `.github/workflows/release.yml` tests, publishes to npm with provenance and creates a
+GitHub release:
+
+```bash
+npm version patch            # or minor / major: commits and tags vX.Y.Z
+git push --follow-tags
+```
+
+Publishing uses npm trusted publishing, set up once with
+`npx npm@latest trust github jev-browser --file release.yml --repo Ying-Kai-Liao/jev-browser --allow-publish`.
+
 ## License
 
 MIT
