@@ -63,12 +63,17 @@ export class JevBrowser {
   // highlight -> outline each target with Jev's decision before acting (for watching a headed run).
   static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false } = {}) {
     let context, own = false;
+    try {
     if (userDataDir) {
       context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, slowMo, viewport });
     } else {
       own = !browser;
       browser ??= await chromium.launch({ headless: !headed, slowMo });
       context = await browser.newContext({ viewport, storageState });
+    }
+    } catch (e) {
+      if (/Executable doesn't exist|browserType\.launch/i.test(String(e.message)) && /install/i.test(String(e.message))) throw new Error("Chromium for Playwright is not installed. Run: npx playwright install chromium");
+      throw e;
     }
     const b = new JevBrowser(browser, context, own);
     b.highlight = highlight;

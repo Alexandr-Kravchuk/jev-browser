@@ -2,6 +2,9 @@
 
 Browser automation where an LLM plans and **Jev** decides.
 
+> Unofficial project, not affiliated with TypeSafe. It calls the TypeSafe System One API
+> with your own API key.
+
 The calling LLM (Claude, via MCP) says what outcome it wants, one step at a time, and hands
 over any text to type. For each round of a step, code describes the page. Then one ~300 ms
 [Typesafe System One](https://docs.typesafe.ai) request asks Jev several questions at once:
@@ -49,9 +52,20 @@ Known limits, so write steps around them:
 - **Judgements that compare many values** (is this table sorted, did exactly one thing change)
   → verify with `browser_check` or `browser_snapshot`.
 
-## Setup
+## Quick start (MCP, from npm)
 
 ```bash
+npx playwright install chromium          # once
+claude mcp add jev-browser -e JEV_API_KEY=your-key -- npx -y -p jev-browser jev-browser-mcp
+```
+
+Any MCP client works the same way: command `npx`, args `-y -p jev-browser jev-browser-mcp`,
+env `JEV_API_KEY`. Add `JEV_BROWSER_HEADED=1` to watch it work.
+
+## Setup (from source)
+
+```bash
+git clone https://github.com/Ying-Kai-Liao/jev-browser && cd jev-browser
 npm install
 npm run setup                    # downloads Chromium for Playwright
 cp .env.example .env             # add JEV_API_KEY
@@ -59,11 +73,13 @@ npm test                         # offline tests (no network, no key)
 npm run test:e2e                 # MCP server end to end (network + key)
 ```
 
-### Use from Claude Code (MCP)
+### Use from Claude Code (MCP, from source)
 
 ```bash
-claude mcp add jev-browser -e JEV_API_KEY=$JEV_API_KEY -- node /absolute/path/to/jev-browser/bin/jev-browser-mcp.mjs
+claude mcp add jev-browser -- node /absolute/path/to/jev-browser/bin/jev-browser-mcp.mjs
 ```
+
+From a source checkout the server reads `JEV_API_KEY` from the repo's `.env`.
 
 | tool | purpose |
 |---|---|
@@ -95,6 +111,7 @@ profile (logins survive restarts), `JEV_BROWSER_LOG=1` prints per-round decision
 ### Library
 
 ```js
+// npm install jev-browser && npx playwright install chromium
 import { JevBrowser } from "jev-browser";
 
 const b = await JevBrowser.launch({ headed: true });
@@ -153,3 +170,7 @@ bench/               tasks with ground-truth checks, runner, context-cost estima
 test/                offline fixture tests, MCP end-to-end test
 NOTES.md             design notes: what works with Jev, what doesn't, and why
 ```
+
+## License
+
+MIT
