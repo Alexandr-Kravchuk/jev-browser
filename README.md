@@ -88,7 +88,7 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 | `browser_check(question)` | yes/no about the page → `p_yes` |
 | `browser_choose(question, options)` | pick among given options → distribution |
 | `browser_snapshot()` | compact numbered element list, for taking over |
-| `browser_act(action, element, value?, key?, destination?)` | act on an element directly, no model |
+| `browser_act(action, element, value?, key?, destination?, accept_dialog?)` | act on an element directly, no model; confirm/prompt dialogs are dismissed unless `accept_dialog` |
 | `browser_screenshot(full_page?)` | PNG image |
 | `browser_close()` | end the session |
 
@@ -99,7 +99,7 @@ From a source checkout the server reads `TYPESAFE_API_KEY` from the repo's `.env
 | `done` | goal reached |
 | `likely_done` | the page looks done but Jev is unsure: verify before moving on |
 | `needs_login` | a sign-in wall and no credentials in `values`; log in yourself (headed + `JEV_BROWSER_PROFILE`) or pass credentials |
-| `needs_confirmation` | next action looks irreversible (order, pay, send, delete); see `pending`, re-call with `allow_irreversible: true` only if the user wants it |
+| `needs_confirmation` | next action, or a confirm dialog it opened (then dismissed), looks irreversible (order, pay, send, delete); see `pending`, re-call with `allow_irreversible: true` only if the user wants it |
 | `error` | the page shows an error after the last action (e.g. wrong password); see `page_text` |
 | `stuck` / `max_actions` | no progress; see `info`, `page_text`, `candidates` |
 | `ambiguous` | low confidence in the target; pick from `candidates` with `browser_act` |

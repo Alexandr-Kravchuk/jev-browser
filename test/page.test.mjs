@@ -184,3 +184,73 @@ test("fixture page has no false covered flags or dialogs", () => {
   assert.deepEqual(page.elements.filter(e => e.covered).map(e => e.text ?? e.label), []);
   assert.equal(page.dialogs, undefined);
 });
+
+// Stub Jev's per-round answers: click element `target` with nothing done.
+const clickAnswers = target => ({
+  done: { noul: 0 }, done_change: { noul: 0 }, blocked: { noul: 0 }, error: { noul: 0 }, login: { noul: 0 }, irreversible: { noul: 0.1 },
+  tool: { choice: "click", probabilities: { click: 0.9 } }, target: { probabilities: { [target]: 0.95 } }, stages: 1,
+});
+
+test("dialogs: confirm is dismissed by default and accepted only when asked", async () => {
+  const b2 = await JevBrowser.launch({ browser });
+  await b2.page.setContent(`<button onclick="document.body.dataset.c = confirm('Delete your account?')">Delete account</button>
+    <button onclick="alert('Saved'); document.body.dataset.a = 'shown'">Save</button>`);
+  const snap = await b2.snapshotText();
+  const del = +snap.match(/\[(\d+)\] button "Delete account"/)[1], save = +snap.match(/\[(\d+)\] button "Save"/)[1];
+  let r = await b2.actOn({ action: "click", element: del });
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.c), "false");
+  assert.match(r.events.join(), /confirm dialog "Delete your account\?" dismissed/);
+  r = await b2.actOn({ action: "click", element: save });
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.a), "shown");
+  assert.match(r.events.join(), /alert dialog "Saved" accepted/);
+  await b2.actOn({ action: "click", element: del, acceptDialog: true });
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.c), "true");
+  await b2.close();
+});
+
+test("dialogs: do() hands back a confirm that Jev rates irreversible, and fails safe without Jev", async () => {
+  const b2 = await JevBrowser.launch({ browser });
+  await b2.page.setContent(`<button onclick="document.body.dataset.c = confirm('Permanently delete 3 files?')">Delete files</button>`);
+  const i = (await b2.snapshot()).elements[0].i;
+  b2.decide = async () => clickAnswers(i);
+  b2.call = async () => ({ answers: { q: { noul: 0.9 } } });
+  let r = await b2.do("Delete the files");
+  assert.equal(r.status, "needs_confirmation");
+  assert.equal(r.pending.dialog, "Permanently delete 3 files?");
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.c), "false");
+  // Jev unavailable: dismiss rather than accept
+  b2.call = async () => { throw new Error("Jev 402"); };
+  r = await b2.do("Delete the files");
+  assert.equal(r.status, "needs_confirmation");
+  // benign confirm is accepted
+  b2.call = async () => ({ answers: { q: { noul: 0.1 } } });
+  await b2.do("Delete the files", { maxActions: 1 });
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.c), "true");
+  await b2.close();
+});
+
+test("loop guard tells different targets apart on an unchanged page", async () => {
+  const b2 = await JevBrowser.launch({ browser });
+  await b2.page.setContent(`<button>A</button><button>B</button><button>C</button><button>D</button>`);
+  const ids = (await b2.snapshot()).elements.map(e => e.i);
+  let n = 0;
+  b2.decide = async () => clickAnswers(ids[n++ % ids.length]);
+  const r = await b2.do("Click every button", { maxActions: 4 });
+  assert.equal(r.status, "max_actions", r.info);
+  await b2.close();
+});
+
+test("act: element numbers are matched to the current page, and stale ones are refused", async () => {
+  const b2 = await JevBrowser.launch({ browser });
+  await b2.page.setContent(`<button onclick="document.body.dataset.hit = 'save'">Save</button><button id="rm">Remove me</button>`);
+  const snap = await b2.snapshotText();
+  const save = +snap.match(/\[(\d+)\] button "Save"/)[1], rm = +snap.match(/\[(\d+)\] button "Remove me"/)[1];
+  // the page gains an element above, which shifts every number
+  await b2.page.evaluate(() => { const x = document.createElement("button"); x.textContent = "New"; x.onclick = () => document.body.dataset.hit = "new"; document.body.prepend(x); });
+  await b2.snapshot();   // renumbers the page, as check() and choose() do
+  await b2.actOn({ action: "click", element: save });
+  assert.equal(await b2.page.evaluate(() => document.body.dataset.hit), "save");
+  await b2.page.evaluate(() => document.getElementById("rm").remove());
+  await assert.rejects(b2.actOn({ action: "click", element: rm }), /no longer on the page/);
+  await b2.close();
+});

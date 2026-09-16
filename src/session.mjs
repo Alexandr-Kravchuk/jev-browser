@@ -34,6 +34,9 @@ export const TOOLS = {
 export const KEYS = ["Escape", "Tab", "Space", "Backspace", "Delete", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End"];
 const TARGETED = new Set(["click", "type", "press_enter", "select", "hover", "right_click", "drag", "upload"]);
 const GUARDED = new Set(["click", "press_enter", "press_key"]);
+// dialog policies: dialog -> accept? Alerts and "leave page?" carry no decision; confirm/prompt may.
+export const SAFE_DIALOGS = d => ["alert", "beforeunload"].includes(d.type());
+export const ACCEPT_DIALOGS = () => true;
 
 const MAX_SINGLE = 240;          // choice questions accept at most 255 options
 const MAX_STATE_CHARS = 70_000;  // requests are capped at 32,768 input tokens
@@ -84,6 +87,8 @@ export class JevBrowser {
   constructor(browser, context, ownBrowser) {
     this.browser = browser; this.context = context; this.ownBrowser = ownBrowser;
     this.inflight = new Map(); this.events = []; this.frames = new Map(); this.lastPage = null;
+    this.shown = null;               // the page whose element numbers the caller last saw
+    this.dialogPolicy = SAFE_DIALOGS;
     this.stats = { calls: 0, jev_ms: 0, tokens: 0 };
     context.addInitScript(() => {
       window.__jevMut = performance.now();
@@ -101,8 +106,10 @@ export class JevBrowser {
   set page(p) {
     this._page = p;
     p.on("dialog", async d => {
-      this.events.push(`${d.type()} dialog "${d.message().slice(0, 100)}" accepted`);
-      await d.accept(this.promptText ?? undefined).catch(() => {});
+      // confirm/prompt dialogs are often the site's own "are you sure?" before deleting or paying
+      const accept = await Promise.resolve(this.dialogPolicy(d)).catch(() => false);
+      this.events.push(`${d.type()} dialog "${d.message().slice(0, 100)}" ${accept ? "accepted" : "dismissed"}`);
+      await (accept ? d.accept(this.promptText ?? undefined) : d.dismiss()).catch(() => {});
     });
     p.on("close", () => { if (this._page === p) { const rest = this.context.pages(); if (rest.length) { this._page = rest.at(-1); this.events.push("tab closed; switched to previous tab"); } } });
   }
@@ -149,7 +156,7 @@ export class JevBrowser {
     return s;
   }
 
-  async snapshotText() { await this.settle(); return formatPage(await this.snapshot()); }
+  async snapshotText() { await this.settle(); this.shown = await this.snapshot(); return formatPage(this.shown); }
 
   async call(state, questions) {
     const r = await jev(state, questions);
@@ -293,12 +300,35 @@ export class JevBrowser {
     return Date.now() - t;
   }
 
-  // Act on an element index from the latest snapshot, chosen by the caller instead of Jev.
-  async actOn({ action, element, value, key, destination }) {
-    if (!this.lastPage) await this.snapshot();
-    const el = this.lastPage.elements.find(e => e.i === element);
-    if (TARGETED.has(action) && !el) throw new Error(`element ${element} is not in the latest snapshot; take a new snapshot`);
-    const ms = await this.act({ tool: action, target: element, value, key, destination });
+  // Element numbers the caller saw can be stale: the page changed, or check()/choose() renumbered
+  // it. Map number i from the page shown to the caller onto a fresh snapshot, matching the element
+  // by name, surrounding text and frame (the k-th of its look-alikes stays the k-th).
+  currentElement(i, cur) {
+    const old = this.shown ?? cur;
+    const path = u => { try { const x = new URL(u); return x.origin + x.pathname; } catch { return u; } };
+    if (path(old.url) !== path(cur.url)) throw new Error(`the page changed since element ${i} was listed (${old.url} -> ${cur.url}); take a new snapshot`);
+    const was = old.elements.find(e => e.i === i);
+    if (!was) throw new Error(`element ${i} is not in the latest snapshot; take a new snapshot`);
+    // same name + surrounding text first, then name alone (surrounding text shifts when neighbours
+    // change). Only trust the k-th look-alike if no look-alike was added or removed.
+    for (const id of [e => `${brief(e)}|${e.near ?? ""}|${e.frame ?? ""}`, e => `${brief(e)}|${e.frame ?? ""}`]) {
+      const before = old.elements.filter(e => id(e) === id(was)), after = cur.elements.filter(e => id(e) === id(was));
+      if (after.length === before.length) return after[before.indexOf(was)];
+    }
+    throw new Error(`element ${i} (${brief(was)}) is no longer on the page, or can't be told apart from similar ones; take a new snapshot`);
+  }
+
+  // Act on an element number from the latest snapshot or browser_do candidates, chosen by the caller instead of Jev.
+  // Confirm/prompt dialogs are dismissed unless acceptDialog.
+  async actOn({ action, element, value, key, destination, acceptDialog = false }) {
+    const cur = element != null || destination != null ? await this.snapshot() : null;
+    const el = element == null ? undefined : this.currentElement(element, cur);
+    if (TARGETED.has(action) && !el) throw new Error(`${action} needs an element`);
+    const dest = destination == null ? undefined : this.currentElement(destination, cur).i;
+    this.dialogPolicy = acceptDialog ? ACCEPT_DIALOGS : SAFE_DIALOGS;
+    let ms;
+    try { ms = await this.act({ tool: action, target: el?.i, value, key, destination: dest }); }
+    finally { this.dialogPolicy = SAFE_DIALOGS; }
     await this.settle();
     const events = this.events.splice(0);
     return { action, element: brief(el), ms, url: this.page.url(), title: await this.page.title().catch(() => ""), ...(events.length ? { events } : {}) };
@@ -306,7 +336,30 @@ export class JevBrowser {
 
   // Work toward one goal.
   // status: done | likely_done (verify) | needs_confirmation | needs_login | error | blocked | stuck | ambiguous | max_actions
-  async do(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {} } = {}) {
+  async do(goal, opts = {}) {
+    const { allowIrreversible = false, irreversibleAt = 0.6 } = opts;
+    this.heldDialog = null;
+    this.dialogPolicy = allowIrreversible ? ACCEPT_DIALOGS : this.dialogGuard(goal, irreversibleAt);
+    try { return await this.runGoal(goal, opts); }
+    finally { this.dialogPolicy = SAFE_DIALOGS; }
+  }
+
+  // Policy for confirm/prompt dialogs during do(): accept unless Jev thinks accepting is hard to undo.
+  dialogGuard(goal, irreversibleAt) {
+    return async d => {
+      if (SAFE_DIALOGS(d)) return true;
+      let p = 1;   // if Jev can't answer, treat the dialog as irreversible and hand it back
+      try {
+        const { answers } = await this.call({ task: { goal }, dialog: { type: d.type(), message: d.message().slice(0, 500) } }, { q: { type: "noul", instructions: "Would accepting `dialog` have an effect outside this browser that is hard to undo, such as placing an order, paying, sending a message, deleting data or publishing?" } });
+        p = answers.q.noul;
+      } catch {}
+      if (p < irreversibleAt) return true;
+      this.heldDialog = { message: d.message().slice(0, 200), p_irreversible: +p.toFixed(2) };
+      return false;
+    };
+  }
+
+  async runGoal(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {} } = {}) {
     const t0 = Date.now(); const calls0 = this.stats.calls;
     const history = []; const rounds = [];
     let prevPage = null, waits = 0, page = null, status = "max_actions", info, pending, retried = false;
@@ -364,7 +417,7 @@ export class JevBrowser {
         await this.settle({ max: 4000 }); await sleep(600); history.push({ action: "wait" }); continue;
       }
       if (TARGETED.has(act.tool) && act.p_target < minTarget) { status = "ambiguous"; info = "target confidence too low; refine the goal or act on a candidate directly"; break; }
-      const seenKey = `${act.tool}|${act.el}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey : ""}|${page.url}|${page.text}|${JSON.stringify(page.elements)}`;
+      const seenKey = `${act.tool}|${brief(act.el)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey : ""}|${page.url}|${page.text}|${JSON.stringify(page.elements)}`;
       seen.set(seenKey, (seen.get(seenKey) ?? 0) + 1);
       if (seen.get(seenKey) >= 3) { status = "stuck"; info = "repeating the same action on the same page without progress"; break; }
       const seq = [...history.filter(h => h.action).map(h => `${h.action}|${h.element}|${h.value ?? ""}`), `${act.tool}|${brief(act.el)}|${["type", "select", "upload"].includes(act.tool) ? act.valueKey ?? "" : ""}`];
@@ -402,7 +455,13 @@ export class JevBrowser {
       try { r.act_ms = await this.act(act); }
       catch (e) { h.error = actionError(e); r.error = h.error; log(`  ! ${h.error}`); }
       history.push(h);
+      if (this.heldDialog) {
+        status = "needs_confirmation"; info = "the action opened a confirmation dialog that looks hard to undo, so it was dismissed; call again with allow_irreversible to accept it";
+        pending = { action: h.action, element: h.element, dialog: this.heldDialog.message, p_irreversible: this.heldDialog.p_irreversible };
+        break;
+      }
     }
+    this.shown = page;
     if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
     const out = { status, goal, url: this.page.url(), title: await this.page.title().catch(() => ""), actions: history, rounds, jev_calls: this.stats.calls - calls0, ms: Date.now() - t0 };
     if (info) out.info = info;

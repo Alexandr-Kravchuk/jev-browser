@@ -10,10 +10,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { JevBrowser } from "../src/session.mjs";
 
+// Holds the launch promise, not the session, so parallel tool calls share one browser.
 let session;
-async function browser() {
-  if (!session) session = await JevBrowser.launch({ headed: process.env.JEV_BROWSER_HEADED === "1", highlight: process.env.JEV_BROWSER_HEADED === "1", userDataDir: process.env.JEV_BROWSER_PROFILE || undefined });
+function browser() {
+  session ??= JevBrowser.launch({ headed: process.env.JEV_BROWSER_HEADED === "1", highlight: process.env.JEV_BROWSER_HEADED === "1", userDataDir: process.env.JEV_BROWSER_PROFILE || undefined })
+    .catch(e => { session = undefined; throw e; });
   return session;
+}
+async function closeSession() {
+  if (!session) return;
+  const s = session; session = undefined;
+  await (await s.catch(() => null))?.close();
 }
 const text = obj => ({ content: [{ type: "text", text: typeof obj === "string" ? obj : JSON.stringify(obj, null, 1) }] });
 const fail = e => ({ isError: true, content: [{ type: "text", text: String(e?.message ?? e).split("\n")[0] }] });
@@ -88,15 +95,16 @@ server.registerTool("browser_snapshot", {
 
 server.registerTool("browser_act", {
   title: "Act on element",
-  description: "Perform one action on an element number from the latest browser_snapshot (or from browser_do candidates). No decision model involved.",
+  description: "Perform one action on an element number from the latest browser_snapshot (or from browser_do candidates). No decision model involved. Numbers are matched to the current page; if the element is gone, take a new snapshot. Confirm/prompt dialogs the action opens are dismissed unless accept_dialog is true.",
   inputSchema: {
     action: z.enum(["click", "type", "press_enter", "press_key", "select", "hover", "right_click", "drag", "upload", "scroll", "back"]),
     element: z.number().int().optional().describe("Element number [i]; not needed for scroll/back/page-level press_key"),
     value: z.string().optional().describe("Text to type, option label to select, or file path to upload"),
     key: z.string().optional().describe("Key for press_key, e.g. Escape"),
     destination: z.number().int().optional().describe("Drop target element number for drag"),
+    accept_dialog: z.boolean().optional().describe("Accept a confirm/prompt dialog this action opens (e.g. \"Delete this item?\"). Default: dismiss"),
   },
-}, wrap(async args => text(await (await browser()).actOn(args))));
+}, wrap(async ({ accept_dialog, ...args }) => text(await (await browser()).actOn({ ...args, acceptDialog: !!accept_dialog }))));
 
 server.registerTool("browser_screenshot", {
   title: "Screenshot",
@@ -112,10 +120,10 @@ server.registerTool("browser_close", {
   description: "Close the browser session. The next call starts a fresh one.",
   inputSchema: {},
 }, wrap(async () => {
-  if (session) { const s = session; session = undefined; await s.close(); }
+  await closeSession();
   return text({ closed: true });
 }));
 
-const shutdown = async () => { if (session) await session.close(); process.exit(0); };
+const shutdown = async () => { await closeSession(); process.exit(0); };
 process.on("SIGINT", shutdown); process.on("SIGTERM", shutdown);
 await server.connect(new StdioServerTransport());
