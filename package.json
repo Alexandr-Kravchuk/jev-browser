@@ -1,0 +1,27 @@
+{
+  "name": "jev-browser",
+  "version": "0.1.0",
+  "description": "Browser automation where an LLM plans and Jev (Typesafe System One) makes every per-step decision. Library, CLI and MCP server.",
+  "type": "module",
+  "private": true,
+  "main": "./src/index.mjs",
+  "exports": { ".": "./src/index.mjs" },
+  "bin": {
+    "jev-browser": "./bin/jev-browser.mjs",
+    "jev-browser-mcp": "./bin/jev-browser-mcp.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "node test/mcp.e2e.mjs",
+    "bench": "node bench/run.mjs",
+    "bench:cost": "node bench/context-cost.mjs",
+    "mcp": "node bin/jev-browser-mcp.mjs",
+    "setup": "npx playwright install chromium"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "playwright": "^1.63.0",
+    "zod": "^4.6.5"
+  }
+}
