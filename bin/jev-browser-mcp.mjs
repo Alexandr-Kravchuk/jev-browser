@@ -12,7 +12,7 @@ import { JevBrowser } from "../src/session.mjs";
 
 let session;
 async function browser() {
-  if (!session) session = await JevBrowser.launch({ headed: process.env.JEV_BROWSER_HEADED === "1", userDataDir: process.env.JEV_BROWSER_PROFILE || undefined });
+  if (!session) session = await JevBrowser.launch({ headed: process.env.JEV_BROWSER_HEADED === "1", highlight: process.env.JEV_BROWSER_HEADED === "1", userDataDir: process.env.JEV_BROWSER_PROFILE || undefined });
   return session;
 }
 const text = obj => ({ content: [{ type: "text", text: typeof obj === "string" ? obj : JSON.stringify(obj, null, 1) }] });
@@ -40,7 +40,7 @@ server.registerTool("browser_do", {
     "- Write one outcome per call (\"Log in\", \"Add the Backpack to the cart\", \"Open the Pull requests tab\"); split ordered sub-tasks into separate calls.",
     "- Put every string to type, option to pick or file path to upload in `values`, with meaningful keys ({email, password}).",
     "- Make open-ended goals measurable (\"until at least 3 new results are shown\").",
-    "Statuses: done | likely_done (Jev is unsure the goal is met: verify with browser_check or browser_snapshot before moving on) | needs_confirmation (next click looks irreversible: re-call with allow_irreversible=true only if the user wants it) | error (page shows an error) | blocked | stuck | ambiguous (see candidates; use browser_act) | max_actions.",
+    "Statuses: done | likely_done (Jev is unsure the goal is met: verify with browser_check or browser_snapshot before moving on) | needs_login (sign-in wall and no credentials given: ask the user to log in, e.g. with JEV_BROWSER_HEADED=1 and JEV_BROWSER_PROFILE, or pass credentials in values) | needs_confirmation (next click looks irreversible: re-call with allow_irreversible=true only if the user wants it) | error (page shows an error) | blocked | stuck | ambiguous (see candidates; use browser_act) | max_actions.",
     "After steps with side effects, use browser_check to confirm nothing unintended changed.",
   ].join("\n"),
   inputSchema: {

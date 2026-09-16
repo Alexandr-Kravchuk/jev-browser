@@ -165,6 +165,26 @@ Current result: 38/41 in two identical runs, 0 false "done" claims (RESULTS.md).
     Playwright-MCP-style loop; on big pages it's 100–2,000×. Jev reads a similar amount instead,
     at ~300 ms per call.
 
+## Round 3: real sites and flaky steps (2026-09-17)
+
+21. **The change summary was actively misleading on the flaky add-item step.** The typed value
+    showed up as "removed", elements whose surrounding text changed showed up as removed and
+    added again, and word-level new text lost repeated words ("walk dog"). After pairing
+    elements (name + surrounding text, then name alone), reporting value/check edits as `changed`,
+    and diffing text as phrases, `done` for the second added todo went 0.29 → 0.59 and the step
+    passed 5/5 with no re-typing. The "not done" states stayed ≤0.23.
+22. **When Jev picks "no action" after acting and `done` is only 0.35–0.5, the goal was reached** in
+    every saved case (5/5), so that now returns `likely_done` instead of `stuck`.
+23. **Login walls need their own status.** On x.com logged out, "open Following" led to X's login page, then
+    to "Continue with Google" and Google's sign-in tab. A `login` noul plus "no credentials in
+    `values`" now returns `needs_login` before any click (1–2 calls).
+24. **Modals aren't always marked up as dialogs.** X's log-in modal is a full-screen fixed `div`.
+    Code now hit-tests each on-screen element (`covered: true`), reports large fixed overlays as
+    dialogs, and turns Playwright's "intercepts pointer events" into "click blocked by an overlay".
+    With that, Jev closed the modal with Escape by itself and finished the step.
+25. **Headless can be blocked silently.** x.com renders nothing in headless Chromium, and settling
+    reports the empty page as quiet after 0.7 s. Use headed mode for such sites; `open()` doesn't detect this yet.
+
 ## Next
 
 - Try it as a real Claude Code MCP server on everyday tasks and log where Claude has to take over.

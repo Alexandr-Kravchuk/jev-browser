@@ -7,7 +7,14 @@ A task is **correct** when every step returns its expected status (`done`/`likel
 fail are correct when no step claims done. **False done** = a step said `done` while its
 ground-truth check failed.
 
-## Two full runs, same code
+## Latest: r10 (after the add-item, overlay and login fixes)
+
+42 tasks (a `login-wall` task was added): **40/42 correct, 0 false done**, 202 Jev calls, 286 ms
+average. Misses: `ti-add-remove` stopped at 2 of 3 buttons but returned `likely_done`, not
+`done`; `ti-sort-table` is still `stuck`. `todomvc-coarse` and `infinite-scroll` now pass. The
+tables below are from the earlier r6/r7 pair (41 tasks) and are kept for comparison.
+
+## Two full runs, same code (r6, r7)
 
 | run | correct | false done | likely_done | Jev calls | avg ms/call | input tokens/call | wall time (41 tasks, 3 parallel) |
 |-----|---------|------------|-------------|-----------|-------------|-------------------|------------------|

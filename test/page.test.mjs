@@ -2,7 +2,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { JevBrowser, repeatsBlock } from "../src/session.mjs";
+import { JevBrowser, repeatsBlock, actionError } from "../src/session.mjs";
 import { pageDiff, formatPage, repeatedElements } from "../src/page-model.mjs";
 
 const FIXTURE = `<!doctype html><html><head><title>Fixture</title>
@@ -106,11 +106,26 @@ test("pageDiff reports added/removed elements, url and metric changes", () => {
   const c = { url: "u2", text: "hello world again", metrics: { elements: 2 }, elements: [{ i: 0, tag: "button", text: "Add" }, { i: 1, tag: "button", text: "Delete" }] };
   const d = pageDiff(a, c);
   assert.deepEqual(d.added, ['button "Delete"']);
-  assert.deepEqual(d.removed, []);
+  assert.equal(d.removed, undefined);
   assert.equal(d.url, "u1 -> u2");
   assert.equal(d.metrics.elements, "1 -> 2");
   assert.equal(d.new_text, "again");
   assert.equal(pageDiff(null, c), undefined);
+});
+
+test("pageDiff pairs duplicates, reports value/check changes, ignores surrounding-text-only changes", () => {
+  const inp = v => ({ i: 1, tag: "input:text", placeholder: "What needs to be done?", near: "todos", ...(v ? { value: v } : {}) });
+  const tog = (n, c = false) => ({ i: 3, tag: "input:checkbox", label: "Toggle Todo", near: n, checked: c });
+  const all = n => ({ i: 2, tag: "input:checkbox", label: "Mark all as complete", near: n, checked: false });
+  const a = { url: "u", text: "todos buy milk 1 item left", elements: [inp("walk the dog"), all("buy milk"), tog("buy milk")] };
+  const b = { url: "u", text: "todos buy milk walk the dog 2 items left", elements: [inp(), all("buy milk walk the dog"), tog("buy milk"), tog("walk the dog")] };
+  const d = pageDiff(a, b);
+  assert.deepEqual(d.added, ['input:checkbox "Toggle Todo" near "walk the dog" checked=false']);
+  assert.deepEqual(d.changed, ['input:text "What needs to be done?" near "todos": value="walk the dog" -> (empty)']);
+  assert.equal(d.removed, undefined);
+  assert.equal(d.new_text, "walk the dog 2 items");
+  const c = { ...b, elements: [inp(), all("x"), tog("buy milk", true), tog("walk the dog")] };
+  assert.deepEqual(pageDiff(b, c).changed, ['input:checkbox "Toggle Todo" near "buy milk": checked=false -> checked=true']);
 });
 
 test("pageDiff reports reordering when the same elements move", () => {
@@ -147,4 +162,25 @@ test("repeatsBlock detects action loops", () => {
   assert.equal(repeatsBlock(["a", "a", "a"], 1, 5), false);
   assert.equal(repeatsBlock(["a", "a", "a", "a", "a"], 1, 5), true);
   assert.equal(repeatsBlock(["a", "a", "a", "a", "a", "a"], 2, 3), false);
+});
+
+test("overlays: covered elements are flagged and an unmarked modal is reported as a dialog", async () => {
+  const b2 = await JevBrowser.launch({ browser });
+  await b2.page.setContent(`<button id="under">Media</button><p>lots of page</p>
+    <div style="position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center">
+      <div style="position:absolute;inset:0;background:rgba(0,0,0,.4)"></div>
+      <div style="position:relative;background:#fff;padding:40px">Don't miss what's happening <button>Log in</button></div>
+    </div>`);
+  const pg = await b2.snapshot();
+  assert.equal(pg.elements.find(e => e.text === "Media").covered, true);
+  assert.equal(pg.elements.find(e => e.text === "Log in").covered, undefined);
+  assert.ok(pg.dialogs?.some(d => /Don't miss what's happening/.test(d)), JSON.stringify(pg.dialogs));
+  const err = await b2.act({ tool: "click", target: pg.elements.find(e => e.text === "Media").i }).then(() => null, actionError);
+  assert.equal(err, "click blocked: another element (a modal, overlay or banner) covers the target");
+  await b2.close();
+});
+
+test("fixture page has no false covered flags or dialogs", () => {
+  assert.deepEqual(page.elements.filter(e => e.covered).map(e => e.text ?? e.label), []);
+  assert.equal(page.dialogs, undefined);
 });

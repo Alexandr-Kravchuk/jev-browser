@@ -125,6 +125,8 @@ export const HARD = [
     steps: [{ goal: "Press the Escape key", assert: "() => document.querySelector('#result').innerText === 'You entered: ESCAPE'" }] },
   { id: "upload", cat: "actions", url: "https://the-internet.herokuapp.com/upload",
     steps: [{ goal: "Upload the file and submit it", values: { file: UPLOAD_FILE }, assert: "() => document.body.innerText.includes('File Uploaded')" }] },
+  { id: "login-wall", cat: "negative", url: `${TI}/secure`,
+    steps: [{ goal: "Open the secure area", expectStatus: "needs_login" }] },
   { id: "neg-missing-option", cat: "negative", expect: "fail", url: `${TI}/dropdown`,
     steps: [{ goal: "Select Option 7 in the dropdown", assert: "() => false" }] },
 ];

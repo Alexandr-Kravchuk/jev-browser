@@ -40,7 +40,7 @@ export const ENUMERATE = ({ start, frame }) => {
     if (!pick && (tag === "th" && el.closest("thead") || tag === "img" && !el.closest("a, button"))) {
       const r = el.getBoundingClientRect(); pick = tag === "th" || (r.width >= 24 && r.height >= 24);
     }
-    if (!pick || el.closest('[aria-hidden="true"], [inert]')) continue;
+    if (!pick || el.closest('[aria-hidden="true"], [inert], [data-jev-overlay]')) continue;
     const type = tag === "input" ? (el.getAttribute("type") || "text").toLowerCase() : null;
     let hit = el;
     let hidden = false;
@@ -109,10 +109,25 @@ export const ENUMERATE = ({ start, frame }) => {
       const m = row?.className && String(row.className.baseVal ?? row.className).match(/\b(completed|done|selected|active|checked|disabled|error|expanded)\b/i);
       if (m) o.row_state = m[1];
     }
+    // covered: something else (a modal, overlay, banner) is on top of the element's center
+    const rr = hit.getBoundingClientRect(), cx = rr.left + rr.width / 2, cy = rr.top + rr.height / 2;
+    if (!hidden && cx >= 0 && cy >= 0 && cx < innerWidth && cy < innerHeight) {
+      const top = (hit.getRootNode()?.elementFromPoint ? hit.getRootNode() : document).elementFromPoint(cx, cy);
+      if (top && top !== hit && !hit.contains(top) && !top.contains(hit) && !(top.tagName === "LABEL" && top.control === el)) o.covered = true;
+    }
     hit.setAttribute("data-jev-i", String(i));
     out.push(o); i++;
   }
   const dlg = [...document.querySelectorAll('dialog[open], [role=dialog], [role=alertdialog], [aria-modal="true"]')].filter(visible).map(d => clean(d.innerText, 400)).filter(Boolean);
+  // overlays that aren't marked up as dialogs: a fixed layer covering most of the viewport at its center
+  for (let n = document.elementFromPoint(innerWidth / 2, innerHeight / 2); n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    const st = getComputedStyle(n), r = n.getBoundingClientRect();
+    if ((st.position === "fixed" || st.position === "sticky") && r.width * r.height >= 0.6 * innerWidth * innerHeight) {
+      const t = clean(n.innerText, 400);
+      if (t && !dlg.includes(t)) dlg.push(t);
+      break;
+    }
+  }
   // text the user can currently see, in DOM order
   let seenText = "";
   if (document.body) {

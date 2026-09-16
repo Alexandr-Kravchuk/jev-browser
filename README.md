@@ -25,10 +25,10 @@ candidates, and code turns disagreement or low confidence into a status the LLM 
 
 ## Results
 
-41 tasks in 16 categories on live sites, two full runs (see [RESULTS.md](RESULTS.md)):
+42 tasks in 16 categories on live sites (see [RESULTS.md](RESULTS.md)):
 
-- **38/41 correct in both runs, 0 false "done" claims.** The 3 failures are known limits of
-  the model (see below).
+- **40/42 correct in the latest run, 0 false "done" claims** (38/41 twice before the latest
+  fixes). Remaining misses: counting ("add until 3", flagged `likely_done`) and verifying a sort.
 - **~300 ms per Jev call**, 2–4 calls for most steps; a 5-step checkout takes ~14 s end to end.
 - **Pause before irreversible actions**: across ~200 rounds it flagged only saucedemo's
   "Finish" (place order) button.
@@ -82,6 +82,7 @@ claude mcp add jev-browser -e JEV_API_KEY=$JEV_API_KEY -- node /absolute/path/to
 |---|---|
 | `done` | goal reached |
 | `likely_done` | the page looks done but Jev is unsure: verify before moving on |
+| `needs_login` | a sign-in wall and no credentials in `values`; log in yourself (headed + `JEV_BROWSER_PROFILE`) or pass credentials |
 | `needs_confirmation` | next action looks irreversible (order, pay, send, delete); see `pending`, re-call with `allow_irreversible: true` only if the user wants it |
 | `error` | the page shows an error after the last action (e.g. wrong password); see `page_text` |
 | `stuck` / `max_actions` | no progress; see `info`, `page_text`, `candidates` |
@@ -103,6 +104,16 @@ await b.do("Add the Sauce Labs Backpack to the cart");
 const p = await b.check("Does the cart badge show 1 item?");   // 0..1
 await b.close();
 ```
+
+### Watch it
+
+```bash
+node examples/x-profile-demo.mjs     # headed, read-only x.com walkthrough with decision highlights
+```
+
+Each action is outlined in red with Jev's choice and scores before it happens (`highlight: true`,
+on by default in the MCP server when `JEV_BROWSER_HEADED=1`). Some sites, x.com included, serve a
+blank page to headless Chromium: use headed mode there.
 
 ### CLI
 

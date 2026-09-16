@@ -39,6 +39,16 @@ const MAX_SINGLE = 240;          // choice questions accept at most 255 options
 const MAX_STATE_CHARS = 70_000;  // requests are capped at 32,768 input tokens
 const GROUP = 30;
 
+// Short, model-readable reason for a failed Playwright action.
+export function actionError(e) {
+  const msg = String(e?.message ?? e);
+  const m = msg.match(/<([a-z0-9-]+)[^>]*>.*?(?:from <[^>]*>)?\s*subtree intercepts pointer events/i) || msg.match(/intercepts pointer events/i);
+  if (m) return "click blocked: another element (a modal, overlay or banner) covers the target";
+  if (/not visible|element is not attached/i.test(msg)) return "target is not visible or no longer on the page";
+  if (/disabled|not enabled/i.test(msg)) return "target is disabled";
+  return msg.split("\n")[0].slice(0, 160);
+}
+
 // true if the last `times * k` entries of seq are one k-long block repeated `times` times
 export function repeatsBlock(seq, k, times) {
   if (seq.length < k * times) return false;
@@ -50,7 +60,8 @@ export function repeatsBlock(seq, k, times) {
 
 export class JevBrowser {
   // userDataDir -> persistent profile (logins survive restarts); browser -> share one Chromium.
-  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir } = {}) {
+  // highlight -> outline each target with Jev's decision before acting (for watching a headed run).
+  static async launch({ headed = false, slowMo = 0, viewport = { width: 1280, height: 800 }, storageState, browser, userDataDir, highlight = false } = {}) {
     let context, own = false;
     if (userDataDir) {
       context = await chromium.launchPersistentContext(userDataDir, { headless: !headed, slowMo, viewport });
@@ -60,6 +71,7 @@ export class JevBrowser {
       context = await browser.newContext({ viewport, storageState });
     }
     const b = new JevBrowser(browser, context, own);
+    b.highlight = highlight;
     b.page = context.pages()[0] ?? await context.newPage();
     return b;
   }
@@ -165,6 +177,7 @@ export class JevBrowser {
       done_change: { type: "noul", instructions: `Does \`page\` show that \`task.goal\` has been achieved${withValues}? Judge from \`page.text\`, \`page.elements\` and \`task.last_change\` (what the last action changed).` },
       blocked: { type: "noul", instructions: "Is there something on `page` that stops progress on `task.goal` and cannot be handled by clicking or typing (captcha, access denied, error page)?" },
       error: { type: "noul", instructions: "Does `page` show an error or rejection message (e.g. invalid credentials, a validation error, not found) caused by the actions in `task.history`?" },
+      login: { type: "noul", instructions: "Is `page` a sign-in or sign-up screen, or asking the user to log in, before `task.goal` can continue?" },
       irreversible: { type: "noul", instructions: "Would the next action toward `task.goal` on `page` have an effect outside this browser that is hard to undo, such as placing an order, paying, sending a message, deleting data or publishing?" },
       tool: { type: "choice", instructions: "What is the next action toward `task.goal` on `page`, given what `task.history` already did?", criteria: TOOLS },
     };
@@ -287,7 +300,7 @@ export class JevBrowser {
   }
 
   // Work toward one goal.
-  // status: done | likely_done (verify) | needs_confirmation | error | blocked | stuck | ambiguous | max_actions
+  // status: done | likely_done (verify) | needs_confirmation | needs_login | error | blocked | stuck | ambiguous | max_actions
   async do(goal, { values = {}, maxActions = 10, doneAt = 0.5, minTarget = 0.3, allowIrreversible = false, irreversibleAt = 0.6, log = () => {} } = {}) {
     const t0 = Date.now(); const calls0 = this.stats.calls;
     const history = []; const rounds = [];
@@ -304,12 +317,12 @@ export class JevBrowser {
       const done = Math.max(a.done.noul, a.done_change?.noul ?? 0);
       const r = {
         round, done: +done.toFixed(2), done_plain: +a.done.noul.toFixed(2), done_change: +(a.done_change?.noul ?? 0).toFixed(2),
-        blocked: +a.blocked.noul.toFixed(2), error_shown: +a.error.noul.toFixed(2), irreversible: +a.irreversible.noul.toFixed(2),
+        blocked: +a.blocked.noul.toFixed(2), error_shown: +a.error.noul.toFixed(2), login: +a.login.noul.toFixed(2), irreversible: +a.irreversible.noul.toFixed(2),
         tool: act.tool, p_tool: +act.p_tool.toFixed(2), target: act.target, p_target: +act.p_target.toFixed(2), el: brief(act.el),
         value: act.valueKey, elements: page.elements.length, stages: a.stages, candidates: act.candidates,
       };
       rounds.push(r);
-      log(`  r${round}: ${act.tool}(${r.p_tool}) -> #${act.target} ${r.el} (${r.p_target})${act.valueKey ? ` value=${act.valueKey}` : ""}  done=${r.done} err=${r.error_shown} irrev=${r.irreversible}  [${page.elements.length} els${a.stages === 2 ? ", 2-stage" : ""}]`);
+      log(`  r${round}: ${act.tool}(${r.p_tool}) -> #${act.target} ${r.el} (${r.p_target})${act.valueKey ? ` value=${act.valueKey}` : ""}  done=${r.done} err=${r.error_shown} login=${r.login} irrev=${r.irreversible}  [${page.elements.length} els${a.stages === 2 ? ", 2-stage" : ""}]`);
 
       if (round > 0 && done >= doneAt && done < 0.85 && act.tool !== "none") {
         // "done" and "next action" disagree: settle it with a stricter single question
@@ -326,10 +339,18 @@ export class JevBrowser {
         }
       } else if (done >= (round > 0 ? doneAt : 0.9) && (done >= 0.85 || act.tool === "none" || round === 0)) { status = "done"; break; }
       if (round === maxActions) break;
+      if (a.login.noul >= 0.7 && !Object.keys(values).length) {
+        // no credentials to type: hand back instead of clicking through sign-in (incl. third-party SSO)
+        status = "needs_login"; info = "the page wants a sign-in and no values were given; log in (e.g. in a headed persistent profile) or pass credentials in values"; break;
+      }
       if (round > 0 && a.error.noul >= 0.7) { status = "error"; info = "the page shows an error after the last action"; break; }
       if (act.tool === "none" && round === 0 && !retried) {
         // content that appears after a delay (modals, late renders): look once more before giving up
         retried = true; await sleep(1500); round--; rounds.pop(); continue;
+      }
+      if (act.tool === "none" && round > 0 && done >= 0.35 && a.error.noul < 0.5 && a.blocked.noul < 0.5) {
+        // Jev sees nothing left to do after acting, but "done" is soft: let the caller verify
+        status = "likely_done"; info = "no further action seems needed but Jev is unsure the goal is met; verify with a check, snapshot or screenshot"; break;
       }
       if (act.tool === "none") { status = a.blocked.noul >= 0.5 ? "blocked" : "stuck"; break; }
       if (a.blocked.noul >= 0.85) { status = "blocked"; break; }
@@ -372,8 +393,9 @@ export class JevBrowser {
       if (act.valueKey && ["type", "select", "upload"].includes(act.tool)) h.value = act.valueKey;
       if (act.key) h.key = act.key;
       if (r.destination) h.destination = r.destination;
+      if (this.highlight && act.target != null) await this.showDecision(act, r).catch(() => {});
       try { r.act_ms = await this.act(act); }
-      catch (e) { h.error = String(e.message).split("\n")[0].slice(0, 160); r.error = h.error; log(`  ! ${h.error}`); }
+      catch (e) { h.error = actionError(e); r.error = h.error; log(`  ! ${h.error}`); }
       history.push(h);
     }
     if (this.events.length) history.push(...this.events.splice(0).map(e => ({ event: e })));
@@ -386,6 +408,24 @@ export class JevBrowser {
       if (["ambiguous", "stuck", "max_actions"].includes(status)) out.candidates = rounds.at(-1)?.candidates;
     }
     return out;
+  }
+
+  async showDecision(act, r) {
+    const label = `${act.tool}${act.valueKey ? ` ← ${act.valueKey}` : ""}${act.key ? ` ${act.key}` : ""}  p=${r.p_target}  done=${r.done}`;
+    const loc = this.locate(act.target);
+    await loc.scrollIntoViewIfNeeded({ timeout: 2000 });
+    await loc.evaluate((el, label) => {
+      const r = el.getBoundingClientRect();
+      const box = document.createElement("div");
+      box.setAttribute("data-jev-overlay", "");
+      Object.assign(box.style, { position: "fixed", left: `${r.left - 3}px`, top: `${r.top - 3}px`, width: `${r.width + 6}px`, height: `${r.height + 6}px`, border: "3px solid #e5484d", borderRadius: "6px", zIndex: 2147483647, pointerEvents: "none" });
+      const tag = document.createElement("div");
+      tag.textContent = label;
+      Object.assign(tag.style, { position: "absolute", left: "-3px", top: r.top > 30 ? "-26px" : `${r.height + 6}px`, background: "#e5484d", color: "#fff", font: "600 12px/1 system-ui", padding: "5px 7px", borderRadius: "4px", whiteSpace: "nowrap" });
+      box.appendChild(tag); document.documentElement.appendChild(box);
+      setTimeout(() => box.remove(), 1400);
+    }, label);
+    await sleep(900);
   }
 
   async screenshot({ path, fullPage = false } = {}) { return this.page.screenshot({ path, fullPage }); }
