@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/2e688df9-4985-4854-8ebe-ba97c9d13d68
-
 # jev-browser
 
 Browser automation where an LLM plans and **Jev** decides.
@@ -25,6 +21,8 @@ Claude ── browser_do("Log in", {email, password}) ──▶ jev-browser
                                                        │   4. act      (Playwright)
 Claude ◀── { status: "done", url, actions[], done_score } ─┘
 ```
+
+https://github.com/user-attachments/assets/2e688df9-4985-4854-8ebe-ba97c9d13d68
 
 Jev only answers with probability distributions: yes/no (`noul`), pick one option (`choice`)
 or a rating (`score`). It never writes text. So everything free-form comes from the caller as
