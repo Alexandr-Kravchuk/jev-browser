@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/2e688df9-4985-4854-8ebe-ba97c9d13d68
+
 # jev-browser
 
 Browser automation where an LLM plans and **Jev** decides.
