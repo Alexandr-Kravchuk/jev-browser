@@ -6,13 +6,15 @@ import { JevBrowser, repeatsBlock, actionError } from "../src/session.mjs";
 import { pageDiff, formatPage, repeatedElements } from "../src/page-model.mjs";
 
 const FIXTURE = `<!doctype html><html><head><title>Fixture</title>
-<style>.ghost{opacity:0;position:absolute} .hidden{display:none} th{cursor:default} .clicky{cursor:pointer} .far{margin-top:3000px}</style></head><body>
+<style>.ghost{opacity:0;position:absolute} .hidden{display:none} .sizerow{position:relative;width:320px;height:90px} .sizerow input{opacity:0;position:absolute;inset:0;width:320px;height:90px;margin:0} .sizerow label{position:relative;display:block;width:320px;height:90px} .sizeinner{height:100%} .vh{position:absolute;top:0;left:0;width:1px;height:1px;clip:rect(1px,1px,1px,1px);clip-path:inset(0 0 99.9% 99.9%);margin:0} .colornav-item{position:relative;padding:10px;list-style:none} .colornav-item label{display:block;width:42px;height:42px} th{cursor:default} .clicky{cursor:pointer} .far{margin-top:3000px}</style></head><body>
 <h1>Fixture page</h1>
 <label for="email">Email address</label><input id="email" type="email" placeholder="you@x.com">
 <label>Password <input type="password" name="pw"></label>
 <span id="lbl">Search the docs</span><input aria-labelledby="lbl">
 <div id="boxes"><input type="checkbox"> checkbox 1<br><input type="checkbox" checked> checkbox 2</div>
 <ul><li class="completed"><input class="ghost" type="checkbox" aria-label="Toggle Todo"><label>buy milk</label></li></ul>
+<div class="sizerow"><input id="size14" type="radio" name="size"><label for="size14"><div class="sizeinner">14 inch</div></label></div>
+<ul class="colornav"><li class="colornav-item"><input id="cblack" class="vh" type="radio" name="colour"><label for="cblack"><span>Space Black</span></label></li></ul>
 <input type="file" class="hidden" id="upl">
 <button disabled>Save</button><button aria-busy="true">Working…</button>
 <select name="s"><option>One</option><option selected>Two</option></select>
@@ -178,6 +180,22 @@ test("overlays: covered elements are flagged and an unmarked modal is reported a
   const err = await b2.act({ tool: "click", target: pg.elements.find(e => e.text === "Media").i }).then(() => null, actionError);
   assert.equal(err, "click blocked: another element (a modal, overlay or banner) covers the target");
   await b2.close();
+});
+
+test("a transparent input under its own nested label is clickable, not covered", async () => {
+  const r = find(e => e.label === "14 inch" && e.tag === "input:radio");
+  assert.ok(r, "ghost radio is listed");
+  assert.equal(r.covered, undefined, "its own label must not count as an overlay");
+  await b.act({ tool: "click", target: r.i });
+  assert.equal(await b.page.locator("#size14").isChecked(), true, "clicking the label selects the real radio");
+});
+
+test("a clipped 1px-hidden input whose container sits on top is clickable, not covered", async () => {
+  const r = find(e => e.label === "Space Black" && e.tag === "input:radio");
+  assert.ok(r, "visually hidden radio is listed");
+  assert.equal(r.covered, undefined, "a visually hidden input is not an overlay victim");
+  await b.act({ tool: "click", target: r.i });
+  assert.equal(await b.page.locator("#cblack").isChecked(), true, "clicking the label selects the real radio");
 });
 
 test("fixture page has no false covered flags or dialogs", () => {
