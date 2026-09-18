@@ -52,6 +52,19 @@ export const ENUMERATE = ({ start, frame }) => {
       else if (type === "file") hidden = true;
       else continue;
     }
+    // visible() keeps styled checkbox/radio replacements on purpose, but the real input
+    // often cannot take the click itself: opacity:0 under its own label, or the 1px
+    // clip-rect "visually hidden" recipe with the swatch container painted on top.
+    // The label is the real control in both cases, so act on it.
+    if (hit === el && (type === "checkbox" || type === "radio")) {
+      const st = getComputedStyle(el), r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const top = cx >= 0 && cy >= 0 && cx < innerWidth && cy < innerHeight ? document.elementFromPoint(cx, cy) : null;
+      const unclickable = +st.opacity <= 0.05 || r.width <= 2 || r.height <= 2
+        || st.clip !== "auto" || st.clipPath !== "none"
+        || (top && top !== el && [...(el.labels || [])].some(l => l === top || l.contains(top)));
+      if (unclickable) { const lab = [...(el.labels || [])].find(visible); if (lab) hit = lab; }
+    }
     if (seen.has(hit)) continue; seen.add(hit);
 
     const role = el.getAttribute("role");
