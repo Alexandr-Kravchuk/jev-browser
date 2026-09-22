@@ -25,7 +25,7 @@ export function apiKey() {
 }
 
 // questions: { name: { type: "noul" | "choice" | "score", instructions, criteria? } }
-export async function jev(state, questions, { retries = 2, timeout = 60_000 } = {}) {
+export async function jev(state, questions, { retries = 5, timeout = 60_000 } = {}) {
   const key = apiKey();
   for (let attempt = 0; ; attempt++) {
     const t = performance.now();
@@ -43,8 +43,9 @@ export async function jev(state, questions, { retries = 2, timeout = 60_000 } = 
       throw e;
     }
     const ms = Math.round(performance.now() - t);
-    if (res.ok) return { answers: body.answers, ms, tokens: body.usage?.input_tokens ?? 0 };
-    if (attempt < retries && (res.status === 429 || res.status >= 500)) { await sleep(800 * (attempt + 1)); continue; }
+    const answers = body.answers ?? body.data?.answers;
+    if (res.ok && answers) return { answers, ms, tokens: body.usage?.input_tokens ?? 0 };
+    if (attempt < retries && (res.status === 429 || res.status >= 500)) { await sleep(Math.min(8000, 1000 * 2 ** attempt) + Math.random() * 500); continue; }
     throw new Error(`Jev ${res.status}: ${JSON.stringify(body).slice(0, 300)}`);
   }
 }
