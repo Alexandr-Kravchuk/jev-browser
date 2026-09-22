@@ -258,6 +258,19 @@ test("loop guard tells different targets apart on an unchanged page", async () =
   await b2.close();
 });
 
+test("an <a> with no href (router-style nav item) is still reachable via the pointer-cursor fallback", async () => {
+  // Real-world shape: a sidebar built with <a class="nav-item"><span>Label</span></a>, no href,
+  // navigation handled by a JS router. Fails the primary `a[href]` selector, so it must be
+  // picked up by the JS-bound-clickable fallback instead of silently disappearing.
+  const b2 = await JevBrowser.launch({ browser });
+  await b2.page.setContent(`<style>.nav-item{cursor:pointer}</style>
+    <aside><a class="nav-item"><span>Ingest</span></a><a class="nav-item"><span>Dashboard</span></a></aside>`);
+  const page2 = await b2.snapshot();
+  assert.ok(page2.elements.some(e => e.text === "Ingest"), "href-less nav anchor must be listed");
+  assert.ok(page2.elements.some(e => e.text === "Dashboard"), "href-less nav anchor must be listed");
+  await b2.close();
+});
+
 test("act: element numbers are matched to the current page, and stale ones are refused", async () => {
   const b2 = await JevBrowser.launch({ browser });
   await b2.page.setContent(`<button onclick="document.body.dataset.hit = 'save'">Save</button><button id="rm">Remove me</button>`);
